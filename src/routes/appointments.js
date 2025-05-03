@@ -66,6 +66,11 @@ router.post("/", authenticate, async (req, res) => {
 // Получение списка записей текущего пользователя
 router.get("/my", authenticate, async (req, res) => {
   try {
+    console.log(
+      "Получение списка записей для пользователя ID:",
+      req.user.userId
+    );
+
     const appointments = await Appointment.findAll({
       where: {
         UserId: req.user.userId,
@@ -84,6 +89,8 @@ router.get("/my", authenticate, async (req, res) => {
         },
       ],
     });
+
+    console.log(`Найдено ${appointments.length} записей`);
 
     // Форматируем данные для ответа
     const formattedAppointments = appointments.map((appointment) => ({
