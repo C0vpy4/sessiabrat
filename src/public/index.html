@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Система записи к врачу</title>
+    <meta charset="UTF-8" />
+    <style>
+      .panel {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+      }
+      .hidden {
+        display: none;
+      }
+      .result {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        white-space: pre-wrap;
+      }
+      .doctor-card,
+      .appointment-card {
+        margin-bottom: 10px;
+        padding: 10px;
+        border: 1px solid #ddd;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Система записи к врачу</h1>
+    <div id="userInfo" class="hidden">
+      Пользователь: <span id="userEmail"></span>
+      <button id="logoutButton">Выйти</button>
+    </div>
+
+    <div id="authPanel" class="panel">
+      <h2>Вход в систему</h2>
+      <form id="loginForm">
+        <div>
+          <label for="email">Email:</label>
+          <input type="email" id="email" name="email" required />
+        </div>
+        <div>
+          <label for="password">Пароль:</label>
+          <input type="password" id="password" name="password" required />
+        </div>
+        <div>
+          <label for="name">Имя (необязательно):</label>
+          <input type="text" id="name" name="name" />
+        </div>
+        <div>
+          <label for="phone">Телефон (необязательно):</label>
+          <input type="text" id="phone" name="phone" />
+        </div>
+        <button type="submit">Войти / Зарегистрироваться</button>
+      </form>
+      <div id="authResult" class="result">
+        Введите данные для входа или регистрации
+      </div>
+    </div>
+
+    <div id="doctorsPanel" class="panel hidden">
+      <h2>Список врачей</h2>
+      <button id="loadDoctorsButton">Загрузить список врачей</button>
+      <div id="doctorsList"></div>
+      <div id="doctorsResult" class="result">
+        Нажмите кнопку для загрузки списка врачей
+      </div>
+    </div>
+
+    <div id="appointmentsPanel" class="panel hidden">
+      <h2>Мои записи на прием</h2>
+      <button id="loadAppointmentsButton">Загрузить мои записи</button>
+      <div id="appointmentsList"></div>
+      <div id="appointmentsResult" class="result">
+        Нажмите кнопку для загрузки ваших записей
+      </div>
+    </div>
+
+    <script>
+      // Глобальные переменные
+      let authToken = localStorage.getItem("authToken");
+      let currentUser = null;
+
+      // Функция для проверки авторизации при загрузке страницы
+      async function checkAuth() {
+        if (authToken) {
+          try {
+            const response = await fetch("/auth/me", {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${authToken}`,
+              },
+            });
+
+            if (response.ok) {
+              currentUser = await response.json();
+              document.getElementById("userEmail").textContent =
+                currentUser.email;
+              document.getElementById("userInfo").classList.remove("hidden");
+              document.getElementById("authPanel").classList.add("hidden");
+              document
+                .getElementById("doctorsPanel")
+                .classList.remove("hidden");
+              document
+                .getElementById("appointmentsPanel")
+                .classList.remove("hidden");
+
+              // Загружаем данные
+              loadDoctors();
+              loadAppointments();
+            } else {
+              // Токен недействителен, удаляем его
+              localStorage.removeItem("authToken");
+              authToken = null;
+            }
+          } catch (error) {
+            console.error("Ошибка проверки авторизации:", error);
+          }
+        }
+      }
+
+      // Обработчик входа/регистрации
+      document
+        .getElementById("loginForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const email = document.getElementById("email").value;
+          const password = document.getElementById("password").value;
+          const name = document.getElementById("name").value;
+          const phone = document.getElementById("phone").value;
+
+          const authResult = document.getElementById("authResult");
+          authResult.textContent = "Выполняется вход...";
+
+          try {
+            const response = await fetch("/auth/login", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ email, password, name, phone }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+              authResult.textContent = "Вход выполнен успешно!";
+              authToken = data.token;
+              currentUser = data.user;
+
+              // Сохраняем токен
+              localStorage.setItem("authToken", authToken);
+
+              // Обновляем UI
+              document.getElementById("userEmail").textContent =
+                currentUser.email;
+              document.getElementById("userInfo").classList.remove("hidden");
+              document.getElementById("authPanel").classList.add("hidden");
+              document
+                .getElementById("doctorsPanel")
+                .classList.remove("hidden");
+              document
+                .getElementById("appointmentsPanel")
+                .classList.remove("hidden");
+
+              // Загружаем данные
+              loadDoctors();
+              loadAppointments();
+            } else {
+              authResult.textContent = `Ошибка: ${data.error}`;
+            }
+          } catch (error) {
+            authResult.textContent = `Ошибка: ${error.message}`;
+          }
+        });
+
+      // Обработчик выхода
+      document
+        .getElementById("logoutButton")
+        .addEventListener("click", async () => {
+          try {
+            if (authToken) {
+              await fetch("/auth/logout", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authToken}`,
+                },
+              });
+            }
+          } catch (error) {
+            console.error("Ошибка при выходе:", error);
+          } finally {
+            // Удаляем токен и данные пользователя
+            localStorage.removeItem("authToken");
+            authToken = null;
+            currentUser = null;
+
+            // Обновляем UI
+            document.getElementById("userInfo").classList.add("hidden");
+            document.getElementById("authPanel").classList.remove("hidden");
+            document.getElementById("doctorsPanel").classList.add("hidden");
+            document
+              .getElementById("appointmentsPanel")
+              .classList.add("hidden");
+            document.getElementById("authResult").textContent =
+              "Вы вышли из системы";
+          }
+        });
+
+      // Загрузка списка врачей
+      document
+        .getElementById("loadDoctorsButton")
+        .addEventListener("click", loadDoctors);
+
+      async function loadDoctors() {
+        const doctorsResult = document.getElementById("doctorsResult");
+        doctorsResult.textContent = "Загрузка списка врачей...";
+
+        try {
+          const response = await fetch("/doctors", {
+            method: "GET",
+            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+          });
+
+          if (response.ok) {
+            const doctors = await response.json();
+            doctorsResult.textContent = `Загружено ${doctors.length} врачей`;
+
+            // Отображаем список врачей
+            const doctorsList = document.getElementById("doctorsList");
+            doctorsList.innerHTML = "";
+
+            doctors.forEach((doctor) => {
+              const doctorCard = document.createElement("div");
+              doctorCard.className = "doctor-card";
+
+              let html = `
+                            <h3>${doctor.fullName}</h3>
+                            <p>Специализация: ${doctor.specialization}</p>
+                            <p>Доступные слоты:</p>
+                            <div>
+                        `;
+
+              if (doctor.availableSlots && doctor.availableSlots.length > 0) {
+                doctor.availableSlots.forEach((slot) => {
+                  html += `<button onclick="bookAppointment(${doctor.id}, '${slot}')">${slot}</button> `;
+                });
+              } else {
+                html += "<p>Нет доступных слотов</p>";
+              }
+
+              html += "</div>";
+              doctorCard.innerHTML = html;
+              doctorsList.appendChild(doctorCard);
+            });
+          } else {
+            const error = await response.json();
+            doctorsResult.textContent = `Ошибка: ${error.error}`;
+          }
+        } catch (error) {
+          doctorsResult.textContent = `Ошибка: ${error.message}`;
+        }
+      }
+
+      // Запись на прием
+      async function bookAppointment(doctorId, slot) {
+        if (!authToken) {
+          alert("Для записи на прием необходимо авторизоваться");
+          return;
+        }
+
+        const doctorsResult = document.getElementById("doctorsResult");
+        doctorsResult.textContent = "Создание записи на прием...";
+
+        try {
+          const response = await fetch("/appointments", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ doctorId, slot }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            doctorsResult.textContent = "Запись на прием успешно создана!";
+            // Обновляем списки
+            loadDoctors();
+            loadAppointments();
+          } else {
+            doctorsResult.textContent = `Ошибка: ${data.error}`;
+          }
+        } catch (error) {
+          doctorsResult.textContent = `Ошибка: ${error.message}`;
+        }
+      }
+
+      // Загрузка списка записей
+      document
+        .getElementById("loadAppointmentsButton")
+        .addEventListener("click", loadAppointments);
+
+      async function loadAppointments() {
+        if (!authToken) {
+          document.getElementById("appointmentsResult").textContent =
+            "Для просмотра записей необходимо авторизоваться";
+          return;
+        }
+
+        const appointmentsResult =
+          document.getElementById("appointmentsResult");
+        appointmentsResult.textContent = "Загрузка списка записей...";
+
+        try {
+          const response = await fetch("/appointments/my", {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+
+          if (response.ok) {
+            const appointments = await response.json();
+            appointmentsResult.textContent = `Загружено ${appointments.length} записей`;
+
+            // Отображаем список записей
+            const appointmentsList =
+              document.getElementById("appointmentsList");
+            appointmentsList.innerHTML = "";
+
+            if (appointments.length === 0) {
+              appointmentsList.innerHTML = "<p>У вас нет активных записей</p>";
+            } else {
+              appointments.forEach((appointment) => {
+                const appointmentCard = document.createElement("div");
+                appointmentCard.className = "appointment-card";
+
+                appointmentCard.innerHTML = `
+                                <p>Врач: ${appointment.doctor.fullName}</p>
+                                <p>Специализация: ${appointment.doctor.specialization}</p>
+                                <p>Время: ${appointment.slot}</p>
+                                <button onclick="cancelAppointment(${appointment.id})">Отменить запись</button>
+                            `;
+
+                appointmentsList.appendChild(appointmentCard);
+              });
+            }
+          } else {
+            const error = await response.json();
+            appointmentsResult.textContent = `Ошибка: ${error.error}`;
+          }
+        } catch (error) {
+          appointmentsResult.textContent = `Ошибка: ${error.message}`;
+        }
+      }
+
+      // Отмена записи на прием
+      async function cancelAppointment(appointmentId) {
+        if (!authToken) {
+          alert("Для отмены записи необходимо авторизоваться");
+          return;
+        }
+
+        const appointmentsResult =
+          document.getElementById("appointmentsResult");
+        appointmentsResult.textContent = "Отмена записи...";
+
+        try {
+          const response = await fetch(`/appointments/${appointmentId}`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+
+          if (response.ok) {
+            appointmentsResult.textContent = "Запись успешно отменена";
+            // Обновляем списки
+            loadDoctors();
+            loadAppointments();
+          } else {
+            const error = await response.json();
+            appointmentsResult.textContent = `Ошибка: ${error.error}`;
+          }
+        } catch (error) {
+          appointmentsResult.textContent = `Ошибка: ${error.message}`;
+        }
+      }
+
+      // Проверяем авторизацию при загрузке страницы
+      checkAuth();
+    </script>
+  </body>
+</html>
