@@ -1,46 +1,71 @@
 const express = require("express");
 const path = require("path");
-const app = express();
+const bodyParser = require("body-parser"); // Убедитесь, что body-parser установлен
 const sequelize = require("./db");
+const config = require("./config");
 
-// Middleware для обработки JSON - добавляем явные настройки
-app.use(
-  express.json({
-    limit: "10mb",
-    strict: false, // Менее строгая проверка JSON
-  })
-);
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb",
-  })
-);
-// Middleware для логирования запросов с подробной информацией
+const app = express();
+
+// Добавляем raw parser для обработки всех запросов как JSON
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
-
-  console.log("Заголовки:", JSON.stringify(req.headers));
-
-  if (req.body) {
-    console.log("Тело запроса:", JSON.stringify(req.body));
+  if (
+    req.method === "POST" &&
+    !req.is("application/json") &&
+    req.headers["content-length"]
+  ) {
+    let data = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
+    req.on("end", () => {
+      try {
+        req.body = JSON.parse(data);
+        console.log("Принудительно обработан JSON:", req.body);
+        next();
+      } catch (e) {
+        console.error("Ошибка парсинга JSON:", e);
+        next();
+      }
+    });
+  } else {
+    next();
   }
+});
 
-  // Добавляем обработчик для логирования ответа
-  const originalSend = res.send;
-  res.send = function (body) {
-    console.log("Ответ:", body);
-    return originalSend.call(this, body);
-  };
+// Стандартные парсеры
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Добавляем middleware для CORS
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
 
   next();
 });
 
-// Обслуживание статических файлов из директории public
+// Middleware для отладки
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  console.log("Headers:", req.headers);
+  console.log("Body:", req.body);
+  next();
+});
+
+// Обслуживание статических файлов
 app.use(express.static(path.join(__dirname, "public")));
 
 // Подключаем маршруты
-const { router: authRouter } = require("./routes/auth");
+const authRouter = require("./routes/auth");
 const doctorsRouter = require("./routes/doctors");
 const appointmentsRouter = require("./routes/appointments");
 
@@ -53,19 +78,7 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Обработка ошибок парсинга JSON
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
-    console.error("Ошибка парсинга JSON:", err);
-    return res.status(400).json({
-      error: "Некорректный JSON в запросе",
-      details: err.message,
-    });
-  }
-  next(err);
-});
-
-// Общая обработка ошибок
+// Обработка ошибок
 app.use((err, req, res, next) => {
   console.error("Ошибка:", err);
   res.status(500).json({
@@ -74,17 +87,27 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Запуск сервера
-const PORT = process.env.PORT || 3000;
+// В конце файла app.js
+const PORT = config.app.port;
+
+// Импортируем все модели для уверенности, что они загружены
+const User = require("./models/User");
+const Doctor = require("./models/Doctor");
+const Appointment = require("./models/Appointment");
+
+// Синхронизируем модели с базой данных
 sequelize
-  .sync()
+  .sync({ force: false }) // force: true удалит и пересоздаст таблицы (осторожно!)
   .then(() => {
+    console.log("Модели синхронизированы с базой данных");
+
     app.listen(PORT, () => {
       console.log(`Сервер запущен на порту ${PORT}`);
     });
   })
+
   .catch((err) => {
-    console.error("Ошибка подключения к базе данных:", err);
+    console.error("Ошибка синхронизации моделей с базой данных:", err);
   });
 
 module.exports = app;
